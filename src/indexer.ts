@@ -5,6 +5,7 @@ import type { App, DataAdapter, ListedFiles, TAbstractFile } from 'obsidian';
 import { listDiskEntries, listHiddenFoldersOnDisk } from './disk-scan';
 import {
 	enabledChildrenOf,
+	isExcluded,
 	listHiddenFolders,
 	mergeUnique,
 	normalizeVaultPath,
@@ -64,8 +65,14 @@ export class HiddenFolderIndexer {
 	private readonly enabled = new Set<string>();
 	private readonly busy = new Set<string>();
 	private patches: AdapterPatches | null = null;
+	private excludes: string[] = [];
 
 	constructor(private readonly app: App) {}
+
+	/** Folders to leave out of the index; see `isExcluded` for the matching rules. */
+	setExcludes(excludes: readonly string[]): void {
+		this.excludes = [...excludes];
+	}
 
 	getEnabled(): string[] {
 		return [...this.enabled].sort();
@@ -76,13 +83,14 @@ export class HiddenFolderIndexer {
 		const configDir = normalizePath(this.app.vault.configDir);
 		const fromAdapter = await listHiddenFolders((path: string) => {
 			return adapter.list(path);
-		}, configDir);
+		}, configDir, this.excludes);
 		if (!(adapter instanceof FileSystemAdapter)) {
 			return fromAdapter;
 		}
 		const fromDisk = await listHiddenFoldersOnDisk(
 			adapter.getBasePath(),
 			configDir,
+			this.excludes,
 		);
 		return mergeUnique(fromAdapter, fromDisk);
 	}
@@ -107,7 +115,9 @@ export class HiddenFolderIndexer {
 	}
 
 	async sync(enabledPaths: string[]): Promise<string[]> {
-		const existing = await this.pruneMissing(enabledPaths);
+		const existing = (await this.pruneMissing(enabledPaths)).filter(
+			(path: string): boolean => !isExcluded(path, this.excludes),
+		);
 		const wanted = new Set(existing);
 		for (const path of this.getEnabled()) {
 			if (!wanted.has(path)) {
@@ -199,7 +209,7 @@ export class HiddenFolderIndexer {
 		if (!(fsAdapter instanceof FileSystemAdapter)) {
 			return;
 		}
-		const listing = await listDiskEntries(fsAdapter.getBasePath(), path);
+		const listing = await listDiskEntries(fsAdapter.getBasePath(), path, this.excludes);
 		for (const folder of listing.folders) {
 			await this.indexTree(folder);
 		}
@@ -244,14 +254,19 @@ export class HiddenFolderIndexer {
 			if (this.isEnabled(parent) || this.enabled.has(parent)) {
 				const fsAdapter = this.app.vault.adapter;
 				if (fsAdapter instanceof FileSystemAdapter) {
-					const disk = await listDiskEntries(fsAdapter.getBasePath(), parent);
+					const disk = await listDiskEntries(
+						fsAdapter.getBasePath(),
+						parent,
+						this.excludes,
+					);
 					extraFolders = mergeUnique(extraFolders, disk.folders);
 					extraFiles = disk.files;
 				}
 			}
+			const visible = (path: string): boolean => !isExcluded(path, this.excludes);
 			return {
-				folders: mergeUnique(original.folders, extraFolders),
-				files: mergeUnique(original.files, extraFiles),
+				folders: mergeUnique(original.folders, extraFolders).filter(visible),
+				files: mergeUnique(original.files, extraFiles).filter(visible),
 			};
 		};
 		adapter.listRecursiveChild = async (
@@ -309,6 +324,9 @@ export class HiddenFolderIndexer {
 
 	private isEnabled(path: string): boolean {
 		const normalized = normalizeVaultPath(path);
+		if (isExcluded(normalized, this.excludes)) {
+			return false;
+		}
 		for (const prefix of this.enabled) {
 			if (this.underPrefix(normalized, prefix)) {
 				return true;
