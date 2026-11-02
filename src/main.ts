@@ -1,7 +1,11 @@
 import { Notice, Plugin } from 'obsidian';
 
 import { HiddenFolderIndexer } from './indexer';
-import { parseSettings, type NestedHiddenFoldersSettings } from './settings';
+import {
+	parseSettings,
+	resolveIndexTargets,
+	type NestedHiddenFoldersSettings,
+} from './settings';
 import { NestedHiddenFoldersSettingTab } from './settings-tab';
 
 export default class NestedHiddenFoldersPlugin extends Plugin {
@@ -10,6 +14,7 @@ export default class NestedHiddenFoldersPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		this.settings = parseSettings(await this.loadData());
+		this.indexer.setExcludes(this.settings.excludedFolders);
 		this.addSettingTab(new NestedHiddenFoldersSettingTab(this.app, this));
 		this.addCommand({
 			id: 'rescan-nested-hidden-folders',
@@ -29,6 +34,10 @@ export default class NestedHiddenFoldersPlugin extends Plugin {
 
 	async refreshFolderList(): Promise<void> {
 		await this.indexer.listHiddenFolders();
+	}
+
+	async saveSettings(): Promise<void> {
+		await this.saveData(this.settings);
 	}
 
 	async setFolderEnabled(path: string, enabled: boolean): Promise<void> {
@@ -59,8 +68,19 @@ export default class NestedHiddenFoldersPlugin extends Plugin {
 		new Notice(`Removed ${path}`);
 	}
 
-	private async syncEnabled(): Promise<void> {
-		const existing = await this.indexer.sync(this.settings.enabledFolders);
+	async syncEnabled(): Promise<void> {
+		this.indexer.setExcludes(this.settings.excludedFolders);
+		const hidden = this.settings.indexAll
+			? await this.indexer.listHiddenFolders()
+			: [];
+		const existing = await this.indexer.sync(
+			resolveIndexTargets(hidden, this.settings),
+		);
+		// With indexAll the targets are derived from disk; keep the manual
+		// selection untouched so switching back restores it.
+		if (this.settings.indexAll) {
+			return;
+		}
 		if (existing.join('\0') !== this.settings.enabledFolders.join('\0')) {
 			this.settings.enabledFolders = existing;
 			await this.saveData(this.settings);

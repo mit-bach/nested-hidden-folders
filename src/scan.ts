@@ -26,9 +26,58 @@ export function isHiddenFolderPath(path: string, configDir: string): boolean {
 	return folderName(normalized).startsWith('.');
 }
 
+/**
+ * A bare name (".git") matches a folder of that name at any depth; an entry
+ * with a slash ("project/.cache") is a vault path. Either also covers
+ * everything below the match.
+ */
+export function isExcluded(path: string, excludes: readonly string[]): boolean {
+	if (excludes.length === 0) {
+		return false;
+	}
+	const normalized = normalizeVaultPath(path);
+	const segments = normalized.split('/');
+	for (const raw of excludes) {
+		const entry = normalizeVaultPath(raw);
+		if (entry.length === 0) {
+			continue;
+		}
+		if (entry.includes('/')) {
+			if (normalized === entry || normalized.startsWith(`${entry}/`)) {
+				return true;
+			}
+		} else if (segments.includes(entry)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Top-most hidden folders that are not excluded; nested ones are covered by their parent. */
+export function selectIndexRoots(
+	hidden: readonly string[],
+	excludes: readonly string[],
+): string[] {
+	const kept = hidden
+		.map(normalizeVaultPath)
+		.filter((path: string): boolean => !isExcluded(path, excludes))
+		.sort();
+	const roots: string[] = [];
+	for (const path of kept) {
+		const covered = roots.some((root: string): boolean => {
+			return path.startsWith(`${root}/`);
+		});
+		if (!covered) {
+			roots.push(path);
+		}
+	}
+	return roots;
+}
+
 export async function listHiddenFolders(
 	list: ListFn,
 	configDir: string,
+	excludes: readonly string[] = [],
 ): Promise<string[]> {
 	const found = new Set<string>();
 	const queue: string[] = [''];
@@ -52,6 +101,9 @@ export async function listHiddenFolders(
 			seen.add(child);
 			const config = normalizeVaultPath(configDir);
 			if (child === config || child.startsWith(`${config}/`)) {
+				continue;
+			}
+			if (isExcluded(child, excludes)) {
 				continue;
 			}
 			if (isHiddenFolderPath(child, configDir)) {

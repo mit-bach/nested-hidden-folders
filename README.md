@@ -12,9 +12,14 @@ Desktop only.
 
 ## Use
 
-1. Enable the plugin.
-2. **Settings → Nested Hidden Folders**.
-3. Refresh, then toggle each hidden path.
+1. Enable the plugin. By default it indexes **all** hidden folders in the vault, including new ones, except `.git`.
+2. **Settings → Nested Hidden Folders** to change that:
+   - **Index all hidden folders** (default on). Turn it off to pick folders one by one with the toggles; your manual selection is kept while the option is on.
+   - **Excluded folders**, one per line. A bare name such as `.git` matches at any depth (`.git`, `project/.git`, `project/.agents/.git`). A path such as `project/.cache` matches from the vault root. An excluded folder and everything below it is never indexed, in both modes. Default: `.git`.
+
+Installs that already had a manual selection stay in manual mode after the update.
+
+Run **Rescan hidden folders** from the command palette after creating hidden folders while Obsidian is open.
 
 ## Tokens / paths
 

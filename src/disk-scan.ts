@@ -1,7 +1,7 @@
 import { readdir } from 'fs/promises';
 import { join } from 'path';
 
-import { isHiddenFolderPath, normalizeVaultPath } from './scan';
+import { isExcluded, isHiddenFolderPath, normalizeVaultPath } from './scan';
 
 export interface DiskListing {
 	files: string[];
@@ -15,6 +15,7 @@ function skipName(name: string): boolean {
 export async function listDiskEntries(
 	vaultRoot: string,
 	relative: string,
+	excludes: readonly string[] = [],
 ): Promise<DiskListing> {
 	const abs = relative.length === 0 ? vaultRoot : join(vaultRoot, relative);
 	const files: string[] = [];
@@ -32,6 +33,9 @@ export async function listDiskEntries(
 		const child = normalizeVaultPath(
 			relative.length === 0 ? entry.name : `${relative}/${entry.name}`,
 		);
+		if (isExcluded(child, excludes)) {
+			continue;
+		}
 		if (entry.isDirectory()) {
 			folders.push(child);
 		} else if (entry.isFile()) {
@@ -44,6 +48,7 @@ export async function listDiskEntries(
 export async function listHiddenFoldersOnDisk(
 	vaultRoot: string,
 	configDir: string,
+	excludes: readonly string[] = [],
 ): Promise<string[]> {
 	const found: string[] = [];
 	const queue: string[] = [''];
@@ -54,7 +59,7 @@ export async function listHiddenFoldersOnDisk(
 		if (relative === undefined) {
 			break;
 		}
-		const listing = await listDiskEntries(vaultRoot, relative);
+		const listing = await listDiskEntries(vaultRoot, relative, excludes);
 		for (const child of listing.folders) {
 			if (seen.has(child)) {
 				continue;
